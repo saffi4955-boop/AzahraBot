@@ -28,7 +28,18 @@ text:
 .mafia say text
 
 ☀️ Day
-.mafia vote <num>`
+.mafia vote <num>
+
+Owner cannot play
+
+*RULES*
+- Minimum 4 players
+- Mafia kills at night
+- Doctor saves at night
+- Don't screenshot your role in group
+- Each Mafia can kill 2 per night
+- Doctor can save 1 per night
+- play anonymously and win`
 },{quoted:msg});
 
 }
@@ -42,7 +53,7 @@ const r = m.create(from);
 
 return sock.sendMessage(from,{
 text: r.ok
-? "🎭 *Mafia Lobby Opened!*\n\nType *.mafia join* to join game"
+? "🎭 *Mafia Lobby Opened!*\n\nType *.mafia join* to join game\n\n*Rules*\n- Minimum 4 players\n- Don't screenshot your role in group\n- Mafia kills at night\n- Doctor saves at night"
 : r.msg
 },{quoted:msg});
 
