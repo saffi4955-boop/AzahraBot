@@ -11,6 +11,7 @@
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@imgly/background-removal": "^1.7.0",
     "@whiskeysockets/baileys": "6.7.21",
+    "adm-zip": "^0.5.17",
     "axios": "^1.14.0",
     "chalk": "4.1.2",
     "ffmpeg-static": "5.2.0",
@@ -19,6 +20,7 @@
     "form-data": "^4.0.4",
     "fs-extra": "11.2.0",
     "google-tts-api": "2.0.2",
+    "https-proxy-agent": "^9.0.0",
     "jimp": "1.6.0",
     "mime-types": "2.1.35",
     "node-cache": "5.1.2",
@@ -28,6 +30,7 @@
     "ruhend-scraper": "9.0.8",
     "sharp": "0.34.5",
     "st-shazam": "^1.0.1",
+    "yt-dlp-exec": "^1.0.2",
     "yt-search": "^2.13.1",
     "ytdl-core": "^4.11.5"
   },

@@ -1,6 +1,6 @@
 // ==============================================
-// 📸 Azahrabot Instagram Downloader (v14 — elite-protech API)
-// Full error logging + robust URL builder
+// 📸 Azahrabot Instagram Downloader
+// Fallback: princetechn API → eliteprotech API
 // ==============================================
 
 const fs = require("fs");
@@ -14,48 +14,67 @@ function ensureTempDir() {
 }
 
 // -----------------------------
-// Fetch media URLs from API (with debug)
+// Fetch media URLs – try princetechn first, then eliteprotech
 // -----------------------------
 async function getMediaFromAPI(igUrl) {
-  const apiUrl = `https://eliteprotech-apis.zone.id/instagram?url=${encodeURIComponent(igUrl)}`;
+  const princetechnUrl = `https://api.princetechn.com/api/download/instadl?apikey=prince&url=${encodeURIComponent(igUrl)}`;
+  console.log("🔗 Trying princetechn API:", princetechnUrl);
 
-  console.log("🔗 Calling API:", apiUrl);
+  try {
+    const res = await axios.get(princetechnUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36",
+        Accept: "application/json",
+      },
+      timeout: 15000,
+    });
 
-  const headers = {
-    "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36",
-    Accept: "application/json",
-    Referer: "https://eliteprotech-apis.zone.id/",
-    Origin: "https://eliteprotech-apis.zone.id",
-  };
+    const data = res.data;
+    console.log("📦 princetechn response:", JSON.stringify(data, null, 2));
 
-  const res = await axios.get(apiUrl, { headers, timeout: 20000 });
-  const data = res.data;
+    if (data.status === 200 && data.success && data.result?.download_url) {
+      return [data.result.download_url]; // single direct video URL
+    }
+    throw new Error("princetechn API returned no download_url");
+  } catch (err) {
+    console.warn("⚠️ princetechn API failed, falling back to eliteprotech:", err.message);
+    // Fallback to the old eliteprotech API
+    const eliteprotechUrl = `https://eliteprotech-apis.zone.id/instagram?url=${encodeURIComponent(igUrl)}`;
+    console.log("🔗 Fallback API:", eliteprotechUrl);
 
-  console.log("📦 API response:", JSON.stringify(data, null, 2));
+    const res2 = await axios.get(eliteprotechUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36",
+        Accept: "application/json",
+        Referer: "https://eliteprotech-apis.zone.id/",
+        Origin: "https://eliteprotech-apis.zone.id",
+      },
+      timeout: 20000,
+    });
 
-  if (!data.success || !data.links || !data.links.length) {
-    throw new Error(`API returned success=${data.success}, links length=${data.links?.length}`);
-  }
+    const data2 = res2.data;
+    console.log("📦 eliteprotech response:", JSON.stringify(data2, null, 2));
 
-  const downloadUrls = [];
+    if (!data2.success || !data2.links || !data2.links.length) {
+      throw new Error(`eliteprotech API failed: success=${data2.success}, links length=${data2.links?.length}`);
+    }
 
-  for (const item of data.links) {
-    if (typeof item === "string") {
-      if (item.startsWith("http")) downloadUrls.push(item);
-    } else if (item && typeof item === "object") {
-      // Format: { "https://cdn.downloadgram.app/": "token=..." }
-      for (const [baseUrl, queryString] of Object.entries(item)) {
-        if (typeof baseUrl === "string" && baseUrl.startsWith("http")) {
-          // Build full URL: baseUrl + "?" + queryString
-          const fullUrl = baseUrl + (queryString ? "?" + queryString : "");
-          if (fullUrl.startsWith("http")) downloadUrls.push(fullUrl);
+    const downloadUrls = [];
+    for (const item of data2.links) {
+      if (typeof item === "string" && item.startsWith("http")) {
+        downloadUrls.push(item);
+      } else if (item && typeof item === "object") {
+        for (const [baseUrl, queryString] of Object.entries(item)) {
+          if (baseUrl.startsWith("http")) {
+            const fullUrl = baseUrl + (queryString ? "?" + queryString : "");
+            if (fullUrl.startsWith("http")) downloadUrls.push(fullUrl);
+          }
         }
       }
     }
+    console.log("✅ Extracted URLs from eliteprotech:", downloadUrls);
+    return downloadUrls;
   }
-
-  console.log("✅ Extracted URLs:", downloadUrls);
-  return downloadUrls;
 }
 
 // -----------------------------
@@ -64,9 +83,9 @@ async function getMediaFromAPI(igUrl) {
 async function downloadMedia(url, dest) {
   const headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "*/*",
-    "Referer": "https://www.instagram.com/",
-    "Origin": "https://www.instagram.com",
+    Accept: "*/*",
+    Referer: "https://www.instagram.com/",
+    Origin: "https://www.instagram.com",
   };
 
   const res = await axios({
@@ -89,13 +108,9 @@ async function downloadMedia(url, dest) {
 // -----------------------------
 module.exports = async (sock, msg, from) => {
   try {
-    const text =
-      msg.message?.conversation || msg.message?.extendedTextMessage?.text || "";
+    const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || "";
 
-    const match = text.match(
-      /(https?:\/\/(?:www\.)?(instagram\.com|instagr\.am)\/[^\s]+)/i
-    );
-
+    const match = text.match(/(https?:\/\/(?:www\.)?(instagram\.com|instagr\.am)\/[^\s]+)/i);
     if (!match) {
       return await sock.sendMessage(
         from,
@@ -109,13 +124,8 @@ module.exports = async (sock, msg, from) => {
     await sock.sendMessage(from, { text: "📸 *Fetching media...*" }, { quoted: msg });
 
     const mediaUrls = await getMediaFromAPI(igUrl);
-
     if (!mediaUrls.length) {
-      return await sock.sendMessage(
-        from,
-        { text: "⚠️ No media found – maybe private post." },
-        { quoted: msg }
-      );
+      return await sock.sendMessage(from, { text: "⚠️ No media found – maybe private post." }, { quoted: msg });
     }
 
     const tempDir = ensureTempDir();
@@ -143,25 +153,14 @@ module.exports = async (sock, msg, from) => {
         await new Promise(r => setTimeout(r, 700));
       } catch (err) {
         console.error(`❌ Item ${i} download failed:`, err.message);
-        await sock.sendMessage(
-          from,
-          { text: `⚠️ Media ${i+1} failed: ${err.message}` },
-          { quoted: msg }
-        );
+        await sock.sendMessage(from, { text: `⚠️ Media ${i + 1} failed: ${err.message}` }, { quoted: msg });
       }
     }
 
-    if (successCount === 0) {
-      throw new Error("All downloads failed");
-    }
-
+    if (successCount === 0) throw new Error("All downloads failed");
     await sock.sendMessage(from, { react: { text: "✅", key: msg.key } });
   } catch (err) {
     console.error("🔥 IG Command Error:", err.message);
-    await sock.sendMessage(
-      from,
-      { text: `❌ Failed: ${err.message}` },
-      { quoted: msg }
-    );
+    await sock.sendMessage(from, { text: `❌ Failed: ${err.message}` }, { quoted: msg });
   }
 };

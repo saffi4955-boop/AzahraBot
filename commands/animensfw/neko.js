@@ -1,0 +1,40 @@
+// commands/database/neko.js
+const axios = require("axios");
+
+const API_KEY = "prince";
+const ENDPOINT = "https://api.princetechn.com/api/anime/neko";
+
+module.exports = async (sock, msg, from, text, args, store) => {
+    try {
+        await sock.sendMessage(from, { react: { text: "🖼️", key: msg.key } });
+
+        const response = await axios.get(ENDPOINT, {
+            params: { apikey: API_KEY },
+            timeout: 10000,
+        });
+
+        const data = response.data;
+        if (!data.success || !data.result) {
+            throw new Error("No image URL returned");
+        }
+
+        const imageUrl = data.result;
+        // Download the image
+        const imgResponse = await axios.get(imageUrl, {
+            responseType: "arraybuffer",
+            headers: { "User-Agent": "Mozilla/5.0" },
+        });
+        const imageBuffer = Buffer.from(imgResponse.data);
+
+        await sock.sendMessage(from, {
+            image: imageBuffer,
+            caption: `🐱 *Neko* — Random cute anime catgirl\n> Powered by AzahraBot`,
+        }, { quoted: msg });
+
+        await sock.sendMessage(from, { react: { text: "✅", key: msg.key } });
+    } catch (err) {
+        console.error("Neko command error:", err.message);
+        await sock.sendMessage(from, { text: `❌ Failed: ${err.message}` }, { quoted: msg });
+        await sock.sendMessage(from, { react: { text: "⚠️", key: msg.key } });
+    }
+};

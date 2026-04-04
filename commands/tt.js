@@ -1,7 +1,5 @@
 // commands/tt.js
-// 🎵 Azahrabot TikTok Downloader (v9.2 — elite-protech API)
-// ✅ Fixed: Uses correct top-level mp4/mp4_hd fields
-
+// 🎵 Azahrabot TikTok Downloader (v10 — princetechn API with fallback)
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
@@ -28,7 +26,7 @@ async function expandTikTokUrl(url) {
   return url;
 }
 
-// 📥 Try multiple download strategies
+// 📥 Download media with retry strategies
 async function downloadMedia(url, destPath) {
   const strategies = [
     {
@@ -48,7 +46,7 @@ async function downloadMedia(url, destPath) {
   for (let i = 0; i < strategies.length; i++) {
     try {
       const headers = strategies[i];
-      console.log(`🔄 Download attempt ${i+1} with ${headers ? 'headers' : 'no headers'}`);
+      console.log(`🔄 Download attempt ${i + 1} with ${headers ? 'headers' : 'no headers'}`);
 
       const res = await axios({
         url,
@@ -73,11 +71,55 @@ async function downloadMedia(url, destPath) {
       console.log("✅ Download successful");
       return;
     } catch (err) {
-      console.log(`   ❌ Attempt ${i+1} failed: ${err.message}`);
+      console.log(`   ❌ Attempt ${i + 1} failed: ${err.message}`);
     }
   }
 
   throw new Error("All download strategies failed");
+}
+
+// Primary API: princetechn
+async function getVideoFromPrinceTechn(ttUrl) {
+  const apiUrl = `https://api.princetechn.com/api/download/tiktok?apikey=prince&url=${encodeURIComponent(ttUrl)}`;
+  console.log("📡 Trying princetechn API:", apiUrl);
+  const res = await axios.get(apiUrl, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36",
+      Accept: "application/json",
+    },
+    timeout: 15000,
+  });
+  const data = res.data;
+  console.log("📦 princetechn response:", JSON.stringify(data, null, 2));
+  if (data.status === 200 && data.success && data.result?.video) {
+    return {
+      videoUrl: data.result.video,
+      title: data.result.title || "TikTok Video",
+    };
+  }
+  throw new Error("princetechn API returned no video URL");
+}
+
+// Fallback API: eliteprotech
+async function getVideoFromEliteProtech(ttUrl) {
+  const apiUrl = `https://eliteprotech-apis.zone.id/tiktok?url=${encodeURIComponent(ttUrl)}`;
+  console.log("📡 Fallback API (eliteprotech):", apiUrl);
+  const res = await axios.get(apiUrl, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36",
+      Accept: "application/json",
+    },
+    timeout: 20000,
+  });
+  const data = res.data;
+  console.log("📦 eliteprotech response:", JSON.stringify(data, null, 2));
+  if (!data.success) throw new Error("eliteprotech API unsuccessful");
+  const videoUrl = data.mp4_hd || data.mp4;
+  if (!videoUrl) throw new Error("No video URL in eliteprotech response");
+  return {
+    videoUrl,
+    title: data.title || "TikTok Video",
+  };
 }
 
 module.exports = async (sock, msg, from) => {
@@ -104,33 +146,24 @@ module.exports = async (sock, msg, from) => {
     await sock.sendMessage(from, { react: { text: "🎵", key: msg.key } });
     await sock.sendMessage(from, { text: "🎵 *Fetching TikTok video...*" }, { quoted: msg });
 
-    // --- API CALL ---
-    const apiUrl = `https://eliteprotech-apis.zone.id/tiktok?url=${encodeURIComponent(ttUrl)}`;
-    console.log("📡 API URL:", apiUrl);
-
-    const res = await axios.get(apiUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36",
-        Accept: "application/json",
-      },
-      timeout: 20000,
-    });
-
-    const data = res.data;
-    console.log("📦 API Response:", JSON.stringify(data, null, 2));
-
-    // --- FIXED: Check for top-level mp4/mp4_hd fields ---
-    if (!data.success) {
-      throw new Error("API returned unsuccessful response");
+    // Try princetechn first, fallback to eliteprotech
+    let videoInfo;
+    try {
+      videoInfo = await getVideoFromPrinceTechn(ttUrl);
+      console.log("✅ Using princetechn API");
+    } catch (err) {
+      console.warn("⚠️ princetechn failed, falling back to eliteprotech:", err.message);
+      try {
+        videoInfo = await getVideoFromEliteProtech(ttUrl);
+        console.log("✅ Using eliteprotech API (fallback)");
+      } catch (fallbackErr) {
+        throw new Error(`Both APIs failed: princetechn (${err.message}) / eliteprotech (${fallbackErr.message})`);
+      }
     }
 
-    if (!data.mp4 && !data.mp4_hd) {
-      throw new Error("No video URL returned from API");
-    }
+    const videoUrl = videoInfo.videoUrl;
+    const title = videoInfo.title;
 
-    // Prefer HD if available
-    const videoUrl = data.mp4_hd || data.mp4;
-    const title = data.title || "TikTok Video";
     console.log("🎬 Video URL:", videoUrl);
 
     const tempDir = ensureTempDir();

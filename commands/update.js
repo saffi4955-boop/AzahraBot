@@ -1,179 +1,115 @@
-// ===============================================================
-// 🔄 Azahrabot Auto-Updater v4.8 (Secure Edition)
-// Safe for Panels • Git + ZIP Support • Preserves Owner Session
-// Syncs with small_lib for secure links and branding
-// ===============================================================
+// commands/system/update.js
 
 const { exec } = require("child_process");
 const fs = require("fs");
 const path = require("path");
-const secure = require("../lib/small_lib"); // ✅ Locked update + author info
+const AdmZip = require("adm-zip"); // 🔥 NEW
+const secure = require("../lib/small_lib");
 
-// 🧠 Run shell commands
 function run(cmd) {
   return new Promise((resolve, reject) => {
     exec(cmd, { windowsHide: true }, (err, stdout, stderr) => {
-      if (err)
-        return reject(
-          new Error((stderr || stdout || err.message || "").toString())
-        );
-      resolve((stdout || "").toString());
+      if (err) return reject(new Error(stderr || stdout || err.message));
+      resolve(stdout.toString());
     });
   });
 }
 
-// 🔍 Check for .git repository (VPS users)
-async function hasGitRepo() {
-  const gitDir = path.join(process.cwd(), ".git");
-  if (!fs.existsSync(gitDir)) return false;
-  try {
-    await run("git --version");
-    return true;
-  } catch {
-    return false;
-  }
-}
+const PROTECTED = [
+  "sessions",
+  "auth_info",
+  "auth_info_baileys",
+  "data",
+  "database",
+  ".env"
+];
 
-// ⚙️ Update via Git (for VPS/CLI users)
-async function updateViaGit() {
-  const oldRev = (await run("git rev-parse HEAD").catch(() => "unknown")).trim();
-  await run("git fetch --all --prune");
-  const newRev = (await run("git rev-parse origin/main")).trim();
-  const alreadyUpToDate = oldRev === newRev;
-
-  if (!alreadyUpToDate) {
-    await run(`git reset --hard ${newRev}`);
-    await run("git clean -fd");
-  }
-
-  return { oldRev, newRev, alreadyUpToDate };
-}
-
-// 🌐 Download ZIP safely (fallback for Replit/panel users)
-function downloadFile(url, dest, visited = new Set()) {
+// ==============================
+// 🌐 DOWNLOAD WITH REDIRECT FIX
+// ==============================
+function downloadFile(url, dest, redirects = 0) {
   return new Promise((resolve, reject) => {
-    try {
-      if (visited.has(url) || visited.size > 8)
-        return reject(new Error("Too many redirects"));
-      visited.add(url);
+    if (redirects > 5) return reject(new Error("Too many redirects"));
 
-      const client = url.startsWith("https://") ? require("https") : require("http");
-      const req = client.get(
-        url,
-        { headers: { "User-Agent": "AzahraBot-Updater/1.0", Accept: "*/*" } },
-        (res) => {
-          if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
-            const location = res.headers.location;
-            if (!location)
-              return reject(new Error(`HTTP ${res.statusCode} without Location header`));
-            const nextUrl = new URL(location, url).toString();
-            res.resume();
-            return downloadFile(nextUrl, dest, visited)
-              .then(resolve)
-              .catch(reject);
-          }
+    const client = url.startsWith("https") ? require("https") : require("http");
 
-          if (res.statusCode !== 200)
-            return reject(new Error(`HTTP ${res.statusCode}`));
+    client.get(url, { headers: { "User-Agent": "Mozilla/5.0" } }, (res) => {
 
-          const file = fs.createWriteStream(dest);
-          res.pipe(file);
-          file.on("finish", () => file.close(resolve));
-          file.on("error", (err) => {
-            try { file.close(() => {}); } catch {}
-            fs.unlink(dest, () => reject(err));
-          });
-        }
-      );
+      if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+        return resolve(downloadFile(res.headers.location, dest, redirects + 1));
+      }
 
-      req.on("error", (err) => fs.unlink(dest, () => reject(err)));
-    } catch (e) {
-      reject(e);
-    }
+      if (res.statusCode !== 200) {
+        return reject(new Error(`HTTP ${res.statusCode}`));
+      }
+
+      const file = fs.createWriteStream(dest);
+      res.pipe(file);
+
+      file.on("finish", () => file.close(resolve));
+      file.on("error", reject);
+
+    }).on("error", reject);
   });
 }
 
-// 📦 Extract ZIP
-async function extractZip(zipPath, outDir) {
-  if (process.platform === "win32") {
-    const cmd = `powershell -NoProfile -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${outDir.replace(/\\/g, "/")}' -Force"`;
-    await run(cmd);
-    return;
-  }
+// ==============================
+// 📦 SAFE COPY
+// ==============================
+function safeCopy(src, dest) {
+  for (const file of fs.readdirSync(src)) {
+    if (PROTECTED.includes(file)) continue;
 
-  try {
-    await run("command -v unzip");
-    await run(`unzip -o '${zipPath}' -d '${outDir}'`);
-  } catch {
-    try {
-      await run("command -v 7z");
-      await run(`7z x -y '${zipPath}' -o'${outDir}'`);
-    } catch {
-      try {
-        await run("busybox unzip -h");
-        await run(`busybox unzip -o '${zipPath}' -d '${outDir}'`);
-      } catch {
-        throw new Error("No unzip tool found (unzip/7z/busybox). Git mode recommended.");
-      }
-    }
-  }
-}
-
-// 🗂 Copy files recursively
-function copyRecursive(src, dest, ignore = [], relative = "", outList = []) {
-  if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
-  for (const entry of fs.readdirSync(src)) {
-    if (ignore.includes(entry)) continue;
-    const s = path.join(src, entry);
-    const d = path.join(dest, entry);
+    const s = path.join(src, file);
+    const d = path.join(dest, file);
     const stat = fs.lstatSync(s);
+
     if (stat.isDirectory()) {
-      copyRecursive(s, d, ignore, path.join(relative, entry), outList);
+      if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+      safeCopy(s, d);
     } else {
       fs.copyFileSync(s, d);
-      outList.push(path.join(relative, entry).replace(/\\/g, "/"));
     }
   }
 }
 
-// 📁 Update via ZIP (default for panels)
+// ==============================
+// 📦 ZIP UPDATE (FIXED)
+// ==============================
 async function updateViaZip(zipUrl, cwd) {
   const tmpDir = path.join(cwd, "tmp_update");
-  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+
+  if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+  fs.mkdirSync(tmpDir);
 
   const zipPath = path.join(tmpDir, "update.zip");
+
   await downloadFile(zipUrl, zipPath);
 
-  const extractTo = path.join(tmpDir, "extracted");
-  if (fs.existsSync(extractTo)) fs.rmSync(extractTo, { recursive: true, force: true });
+  // 🔥 USE ADM-ZIP INSTEAD OF SYSTEM UNZIP
+  const zip = new AdmZip(zipPath);
+  zip.extractAllTo(tmpDir, true);
 
-  await extractZip(zipPath, extractTo);
+  let extracted = tmpDir;
+  const items = fs.readdirSync(tmpDir);
 
-  // detect root
-  let srcRoot = extractTo;
-  const items = fs.readdirSync(extractTo).map((n) => path.join(extractTo, n));
-  if (items.length === 1 && fs.lstatSync(items[0]).isDirectory()) srcRoot = items[0];
+  if (items.length === 1) {
+    extracted = path.join(tmpDir, items[0]);
+  }
 
-  const ignore = [
-    "node_modules", ".git", ".env", "auth_info", "tmp", "tmp_update",
-    "data", ".replit", ".local", "baileys_store.json", "package-lock.json"
-  ];
+  safeCopy(extracted, cwd);
 
-  const copied = [];
-  copyRecursive(srcRoot, cwd, ignore, "", copied);
+  fs.rmSync(tmpDir, { recursive: true, force: true });
 
-  // cleanup
-  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-
-  await run("npm cache clean --force").catch(() => {});
-  return { copiedFiles: copied };
+  return true;
 }
 
-// ♻️ Restart after update
-async function restartProcess(sock, chatId, message) {
-  await sock.sendMessage(chatId, {
-    text: "✅ Update complete! Restarting…",
-  }).catch(() => {});
+// ==============================
+// 🔄 RESTART
+// ==============================
+async function restart(sock, from) {
+  await sock.sendMessage(from, { text: "♻️ Restarting bot..." });
+
   try {
     await run("pm2 restart all");
   } catch {
@@ -181,52 +117,47 @@ async function restartProcess(sock, chatId, message) {
   }
 }
 
-// ===============================================================
-// 🧩 MAIN COMMAND HANDLER
-// ===============================================================
-module.exports = async (sock, msg, from, body, args = []) => {
-  const sender = msg.key?.participant || msg.key?.remoteJid || "unknown";
-  const ownerNumber = (secure.ownerNumber || "").replace(/[^0-9+]/g, "");
-  const senderIsOwner = msg.key.fromMe || sender.includes(ownerNumber);
+// ==============================
+// 🚀 MAIN
+// ==============================
+module.exports = async (sock, msg, from) => {
+  const sender = msg.key?.participant || msg.key?.remoteJid || "";
+  const owner = (secure.ownerNumber || "").replace(/\D/g, "");
 
-  if (!senderIsOwner) {
-    await sock.sendMessage(from, { text: "❌ Only the bot owner can run .update" }, { quoted: msg });
-    return;
+  const isOwner =
+    msg.key.fromMe ||
+    sender.includes(owner) ||
+    owner.includes(sender);
+
+  if (!isOwner) {
+    return sock.sendMessage(from, { text: "❌ Owner only." }, { quoted: msg });
   }
 
   try {
-    await sock.sendMessage(from, { text: "🔄 Checking for updates… please wait ⏳" }, { quoted: msg });
-    const cwd = process.cwd();
+    await sock.sendMessage(from, { text: "🔍 Checking for updates..." }, { quoted: msg });
 
-    if (await hasGitRepo()) {
-      const { newRev, alreadyUpToDate } = await updateViaGit();
-      const summary = alreadyUpToDate
-        ? `✅ Already up to date: ${newRev}`
-        : `✅ Updated successfully to ${newRev}`;
-      await run("npm install --no-audit --no-fund").catch(() => {});
-      await sock.sendMessage(from, { text: `${summary}\nRestarting Azahrabot…` }, { quoted: msg });
-      await restartProcess(sock, from, msg);
-      return;
-    }
-
-    // ZIP Fallback
-    const zipUrl = secure.updateZipUrl || process.env.UPDATE_ZIP_URL;
+    const zipUrl = secure.updateZipUrl;
     if (!zipUrl) {
-      await sock.sendMessage(from, { text: "❌ Update URL missing in small_lib.js" }, { quoted: msg });
-      return;
+      return sock.sendMessage(from, { text: "❌ No update URL configured." }, { quoted: msg });
     }
 
-    const result = await updateViaZip(zipUrl, cwd);
-    await run("npm install --no-audit --no-fund").catch(() => {});
+    await sock.sendMessage(from, { text: "⬇️ Downloading update..." }, { quoted: msg });
+
+    await updateViaZip(zipUrl, process.cwd());
+
+    await run("npm install --omit=dev").catch(() => { });
+
     await sock.sendMessage(from, {
-      text: `✅ *Update Completed Successfully!*
-📦 Files Updated: ${result.copiedFiles.length || 0}
-🔁 Restarting Azahrabot...`,
+      text: "✅ Update complete!\n🔒 Sessions safe\n📦 Packages installed"
     }, { quoted: msg });
 
-    await restartProcess(sock, from, msg);
+    await restart(sock, from);
+
   } catch (err) {
-    console.error("❌ Update failed:", err);
-    await sock.sendMessage(from, { text: `⚠️ Update failed:\n${String(err.message || err)}` }, { quoted: msg });
+    console.error("Update error:", err);
+
+    await sock.sendMessage(from, {
+      text: `❌ Update failed:\n${err.message}`
+    }, { quoted: msg });
   }
 };
