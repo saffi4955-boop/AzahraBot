@@ -138,7 +138,7 @@ Azahrabot features an advanced **dual-engine AI chatbot** that auto-replies in D
 
 **Switch AI Engine:**
 ```
-.chatbot gpt on      # Use GPT (OpenRouter) as primary engine
+.chatbot gpt on      # Use GPT as primary engine
 .chatbot gemini on   # Use Gemini as primary engine
 ```
 
