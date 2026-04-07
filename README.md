@@ -126,6 +126,61 @@ Designed for:
 .antispam delete/kick/warn on 
 ```
 
+### 🤖 AI Chatbot (Smart Auto-Reply)
+
+Azahrabot features an advanced **dual-engine AI chatbot** that auto-replies in DMs and groups with human-like conversation.
+
+**Enable / Disable:**
+```
+.chatbot on          # Turn ON AI auto-reply
+.chatbot off         # Turn OFF AI auto-reply
+```
+
+**Switch AI Engine:**
+```
+.chatbot gpt on      # Use GPT (OpenRouter) as primary engine
+.chatbot gemini on   # Use Gemini as primary engine
+```
+
+**How it works in Groups:**
+- Mention the bot with `@botname` → bot replies
+- Reply to any bot message → bot continues the conversation
+- Call it by name ("azahrabot", "azahra") → bot responds
+- Automatic fallback: if primary AI fails, secondary AI takes over
+
+**How it works in DMs:**
+- Every non-command message gets an AI reply automatically
+
+**Features:**
+- 🧠 **Conversation Memory** — remembers last 10 messages per user (15 min TTL)
+- 🔄 **Dual Engine Fallback** — GPT → Gemini (or vice versa), never leaves user hanging
+- 🎭 **Personality** — witty, confident, gen-z style with Azahrabot identity
+- 🌐 **Multi-language** — responds in the user's language
+
+---
+
+### 🧠 AI Commands
+
+```
+.gpt <prompt>        # Ask GPT directly
+.gemini <prompt>     # Ask Gemini directly
+.copilot <prompt>    # Ask Copilot AI
+.imagine <prompt>    # Generate AI images
+.flux <prompt>       # Generate AI images (Flux model)
+.aivideo <prompt>    # Generate AI video from text
+.attp <text>         # Animated text-to-sticker
+.tts <text>          # Text-to-speech audio
+.trt <text>          # Translate text
+```
+
+### 🎬 AI Video Generator
+```
+.aivideo a cat walking on the moon
+```
+- Generates AI video from your text prompt
+- 30-second cooldown between requests
+- Falls back to direct link if video can't be sent
+
 ### 🛡 Security Systems
 - Anti-Link  
 - Anti-Tag  
